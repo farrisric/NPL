@@ -157,7 +157,7 @@ class GuidedSearch(GOSearch):
         self.total_energies = None
         self.energy_calculator = None
 
-    def fit_energy_expression(self, training_set, symbols):
+    def fit_energy_expression(self, training_set, symbols, energy_key='EMT'):
         global_feature_classifier = GFC.TopologicalFeatureClassifier(symbols)
 
         self.energy_calculator = EC.BayesianRRCalculator(global_feature_classifier.get_feature_key())
@@ -165,7 +165,7 @@ class GuidedSearch(GOSearch):
         for p in training_set:
             global_feature_classifier.compute_feature_vector(p)
 
-        self.energy_calculator.fit(training_set, 'EMT')
+        self.energy_calculator.fit(training_set, energy_key)
 
         n_atoms = sum(list(training_set[0].get_stoichiometry().values()))
         lin_coef = self.energy_calculator.get_coefficients()

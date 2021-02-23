@@ -4,6 +4,11 @@ from scipy.special import sph_harm
 
 
 class LocalEnvironmentCalculator:
+    """Base class for local environment calculators.
+
+    Intended use: Implementations should implement predict_local_environment() which calculates and returns
+    the local environment of a single atom.
+    """
     def __init__(self):
         pass
 
@@ -19,15 +24,19 @@ class LocalEnvironmentCalculator:
         raise NotImplementedError
 
 
-# TODO Experimental
 class SOAPCalculator(LocalEnvironmentCalculator):
+    """ Experimental class. Compute the spherical harmonics power spectrum for each atom and element.
+
+    Based on the code provided by Dr. Johannes Margraf.
+    See https://arxiv.org/abs/1901.10971v1 Ceriotti et al. for details, used convention etc.
+    """
     def __init__(self, l_max):
         LocalEnvironmentCalculator.__init__(self)
         self.l_max = l_max
 
     def predict_local_environment(self, particle, lattice_index):
         def map_onto_unit_sphere(cartesian_coordinates):
-            # note the use of the scipy.special.sph_harm notation for phi and theta (which is the opposite of wikipedias)
+            # different use of the scipy.special.sph_harm notation for phi and theta (opposite of Wikipedia)
             def angular_from_cartesian_coordinates(cartesian_coordinates):
                 x = cartesian_coordinates[0]
                 y = cartesian_coordinates[1]
@@ -95,6 +104,10 @@ class SOAPCalculator(LocalEnvironmentCalculator):
 
 
 class NeighborCountingEnvironmentCalculator(LocalEnvironmentCalculator):
+    """Calculate a local environment of the form [n_a, n_b], where n_a denotes the number of surrounding a atoms.
+
+    Currently restricted to two elements which are ordered alphabetically. Requires a valid neighbor list.
+    """
     def __init__(self, symbols):
         LocalEnvironmentCalculator.__init__(self)
         symbols_copy = copy.deepcopy(symbols)

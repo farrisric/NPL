@@ -3,6 +3,11 @@ import copy
 
 
 class GlobalFeatureClassifier:
+    """Base class for classifiers that produce a feature vector directly from a particle without the need
+    for precomputing local environments.
+
+    Valid implementations have to implement the compute_feature_vector(particle) method.
+    """
     def __init__(self):
         self.feature_key = None
 
@@ -19,6 +24,12 @@ class GlobalFeatureClassifier:
 # TODO better name
 # TODO refactor handling of symbols
 class SimpleFeatureClassifier(GlobalFeatureClassifier):
+    """Base class for classifiers which provides handling of two elements and calculation of bond counts.
+
+    Entries for different elements in feature vectors have to be ordered consistently. This class uses an
+     alphabetical ordering of TWO elements. The returned feature vector consists of [n_aa_bonds/n_atoms,
+     n_ab_bonds/n_atoms, n_bb_bonds/n_atoms, n_a_atoms*0.1].
+    """
     def __init__(self, symbols):
         GlobalFeatureClassifier.__init__(self)
         symbols_copy = copy.deepcopy(symbols)
@@ -36,7 +47,6 @@ class SimpleFeatureClassifier(GlobalFeatureClassifier):
         M = particle.get_stoichiometry()[self.symbol_a] * 0.1
         particle.set_feature_vector(self.feature_key, np.array([n_aa_bonds / n_atoms, n_bb_bonds / n_atoms, n_ab_bonds / n_atoms, M]))
 
-    # TODO move to BaseNanoparticle?
     def compute_respective_bond_counts(self, particle):
         n_aa_bonds = 0
         n_ab_bonds = 0
@@ -66,6 +76,11 @@ class SimpleFeatureClassifier(GlobalFeatureClassifier):
 
 
 class TopologicalFeatureClassifier(SimpleFeatureClassifier):
+    """Classifier for a generalization of the topological descriptors by Kozlov et al. (2015).
+
+    Implemented for TWO elements, which are sorted alphabetically.The returned feature vector will have the form
+    [n_aa_bonds/n_atoms, n_ab_bonds/n_atoms, n_bb_bonds/n_atoms, n_a_atoms*0.1, n_a(cn=0), n_a(cn=1), ..., n_a(cn=12].
+    """
     def __init__(self, symbols):
         SimpleFeatureClassifier.__init__(self, symbols)
         self.feature_key = 'TFC'
@@ -83,6 +98,12 @@ class TopologicalFeatureClassifier(SimpleFeatureClassifier):
 
 # TODO move to separate modules & rename
 class CoordinationFeatureClassifier(SimpleFeatureClassifier):
+    """Feature classifier that counts how often each coordination number appears if vacancies (atoms of element 'X')
+     are present in an otherwise PURE particle.
+
+     Form of the feature vector:
+     [n_aa_bonds, n_a(cn=0), n_a(cn=1), ... n_a(cn=12)]
+     """
     def __init__(self, symbols):
         SimpleFeatureClassifier.__init__(self, symbols)
         self.feature_key = 'TFC'

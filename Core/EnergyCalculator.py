@@ -8,6 +8,11 @@ from sklearn.linear_model import BayesianRidge
 
 
 class EnergyCalculator:
+    """Base class for an energy calculator.
+
+    Valid implementations have to implement the compute_energy(particle) function.
+    Energies are saved in the particle object with the key of the respective calculator.
+    """
     def __init__(self):
         self.energy_key = None
         pass
@@ -23,6 +28,8 @@ class EnergyCalculator:
 
 
 class EMTCalculator(EnergyCalculator):
+    """Wrapper class around the asap3 EMT calculator."""
+
     def __init__(self, fmax=0.01, steps=20):
         EnergyCalculator.__init__(self)
         self.fmax = fmax
@@ -30,6 +37,15 @@ class EMTCalculator(EnergyCalculator):
         self.energy_key = 'EMT'
 
     def compute_energy(self, particle, relax_atoms=False):
+        """Compute the energy using EMT.
+
+        BFGS is used for relaxation. By default, the atoms are NOT relaxed, i.e. the
+        geometry remains unchanged unless this is explicitly stated.
+
+        Parameters:
+            particle : Nanoparticle
+            relax_atoms : bool
+        """
         cell_width = 1e3
         cell_height = 1e3
         cell_length = 1e3
@@ -48,6 +64,8 @@ class EMTCalculator(EnergyCalculator):
 
 
 class GPRCalculator(EnergyCalculator):
+    """Energy calculator using global feature vectors and Gaussian Process Regression."""
+
     def __init__(self, feature_key, kernel=None, alpha=0.01, normalize_y=True):
         EnergyCalculator.__init__(self)
         if kernel is None:
@@ -62,6 +80,15 @@ class GPRCalculator(EnergyCalculator):
         self.feature_key = feature_key
 
     def fit(self, training_set, energy_key):
+        """Fit the GPR model.
+
+        The feature vectors with key = self.feature_key will be used for feature vectors. The
+        energy with the specified energy_key will be the target function.
+
+        Parameters:
+            training_set : list of Nanoparticles
+            energy_key : str
+        """
         feature_vectors = [p.get_feature_vector(self.feature_key) for p in training_set]
         energies = [p.get_energy(energy_key) for p in training_set]
 
@@ -70,13 +97,24 @@ class GPRCalculator(EnergyCalculator):
         self.GPR.fit(feature_vectors, energies)
 
     def compute_energy(self, particle):
+        """Compute the energy using GPR.
+
+        Assumes that a feature vector with key=self.feature_key is present in the particle.
+
+        Parameters:
+            particle : Nanoparticle
+        """
         energy = self.GPR.predict([particle.get_feature_vector(self.feature_key)])[0]
         particle.set_energy(self.energy_key, energy)
 
 
 class MixingEnergyCalculator(EnergyCalculator):
-    # TODO decouple from EMT, couple with any other energy calculator
-    def __init__(self, mixing_parameters=None, fmax=0.05, steps=20, recompute_emt_energy=False):
+    """Compute the mixing energy using an arbitrary energy model.
+
+    For the original energy model it is assumed that all previous steps in the energy pipeline, e.g. calculation
+    of local environment, feature vectors etc. has been carried out.
+    """
+    def __init__(self, base_calculator=None, mixing_parameters=None, recompute_energies=False):
         EnergyCalculator.__init__(self)
 
         if mixing_parameters is None:
@@ -84,21 +122,37 @@ class MixingEnergyCalculator(EnergyCalculator):
         else:
             self.mixing_parameters = mixing_parameters
 
-        self.emt_calculator = EMTCalculator(fmax=fmax, steps=steps)
-        self.recompute_emt_energy = recompute_emt_energy
+        self.base_calculator = base_calculator
+        self.recompute_energies = recompute_energies
         self.energy_key = 'Mixing Energy'
 
     def compute_mixing_parameters(self, particle, symbols):
-        n_atoms = particle.atoms.get_n_atoms()
+        """Compute the energies for the pure particles of the given symbols as reference points.
+
+        Parameters:
+            particle : Nanoparticle
+            symbols : list of str
+        """
         for symbol in symbols:
-            particle.random_ordering({symbol: n_atoms})
-            self.emt_calculator.compute_energy(particle)
+            particle.random_ordering({symbol: 1.0})
+            self.base_calculator.compute_energy(particle)
             self.mixing_parameters[symbol] = particle.get_energy('EMT')
 
     def compute_energy(self, particle):
-        if self.recompute_emt_energy:
-            self.emt_calculator.compute_energy(particle)
-        mixing_energy = particle.get_energy('EMT')
+        """Compute the mixing energy of the particle using the base energy model.
+
+        If energies have been computed using the same energy model as the base calculator they are reused if
+        self.recompute_energies == False
+
+        Parameters:
+            particle : Nanoparticle
+        """
+        if self.recompute_energies:
+            self.base_calculator.compute_energy(particle)
+
+        energy_key = self.base_calculator.get_energy_key()
+        mixing_energy = particle.get_energy(energy_key)
+
         n_atoms = particle.atoms.get_n_atoms()
 
         for symbol in particle.get_stoichiometry():
@@ -108,6 +162,8 @@ class MixingEnergyCalculator(EnergyCalculator):
 
 
 class BayesianRRCalculator(EnergyCalculator):
+    """Energy calculator using global feature vectors and Bayesian Ridge Regression."""
+
     def __init__(self, feature_key):
         EnergyCalculator.__init__(self)
 
@@ -116,6 +172,15 @@ class BayesianRRCalculator(EnergyCalculator):
         self.feature_key = feature_key
 
     def fit(self, training_set, energy_key):
+        """Fit the BRR model.
+
+        The feature vectors with key=self.feature_key will be used for feature vectors. The
+        energy with the specified energy_key will be the target function.
+
+        Parameters:
+            training_set : list of Nanoparticles
+            energy_key : str
+        """
         feature_vectors = [p.get_feature_vector(self.feature_key) for p in training_set]
         energies = [p.get_energy(energy_key) for p in training_set]
 
@@ -131,11 +196,19 @@ class BayesianRRCalculator(EnergyCalculator):
         self.feature_key = feature_key
 
     def compute_energy(self, particle):
+        """Compute the energy using BRR.
+
+        Assumes that a feature vector with key=self.feature_key is present in the particle.
+
+        Parameters:
+            particle : Nanoparticle
+        """
         brr_energy = np.dot(np.transpose(self.ridge.coef_), particle.get_feature_vector(self.feature_key))
         particle.set_energy(self.energy_key, brr_energy)
 
 
-# TODO move to relevant file -> Basin Hopping
+# TODO move to relevant file -> Basin Hopping, Local optimization
+# TODO remove scaling factors from topological descriptors
 def compute_coefficients_for_linear_topological_model(global_topological_coefficients, symbols, n_atoms):
     coordination_numbers = list(range(13))
     symbols_copy = copy.deepcopy(symbols)
@@ -143,36 +216,36 @@ def compute_coefficients_for_linear_topological_model(global_topological_coeffic
     symbol_a = symbols_copy[0]
     print("Coef symbol_a: {}".format(symbol_a))
 
-    E_aa_bond = global_topological_coefficients[0]/n_atoms
-    E_bb_bond = global_topological_coefficients[1]/n_atoms
-    E_ab_bond = global_topological_coefficients[2]/n_atoms
+    e_aa_bond = global_topological_coefficients[0]/n_atoms
+    e_bb_bond = global_topological_coefficients[1]/n_atoms
+    e_ab_bond = global_topological_coefficients[2]/n_atoms
 
     coefficients = []
     total_energies = []
     for symbol in symbols_copy:
         for cn_number in coordination_numbers:
             for n_symbol_a_atoms in range(cn_number + 1):
-                E = 0
+                energy = 0
 
                 if symbol == symbol_a:
-                    E += (global_topological_coefficients[3]*0.1) # careful...
-                    E += (n_symbol_a_atoms*E_aa_bond/2)
-                    E += ((cn_number - n_symbol_a_atoms)*E_ab_bond/2)
-                    E += (global_topological_coefficients[4 + cn_number])
+                    energy += (global_topological_coefficients[3]*0.1)  # careful...
+                    energy += (n_symbol_a_atoms*e_aa_bond/2)
+                    energy += ((cn_number - n_symbol_a_atoms)*e_ab_bond/2)
+                    energy += (global_topological_coefficients[4 + cn_number])
 
-                    E_tot = E
-                    E_tot += n_symbol_a_atoms*E_aa_bond/2
-                    E_tot += (cn_number - n_symbol_a_atoms)*E_ab_bond/2
+                    total_energy = energy
+                    total_energy += n_symbol_a_atoms*e_aa_bond/2
+                    total_energy += (cn_number - n_symbol_a_atoms)*e_ab_bond/2
                 else:
-                    E += (n_symbol_a_atoms*E_ab_bond/2)
-                    E += ((cn_number - n_symbol_a_atoms)*E_bb_bond/2)
+                    energy += (n_symbol_a_atoms*e_ab_bond/2)
+                    energy += ((cn_number - n_symbol_a_atoms)*e_bb_bond/2)
 
-                    E_tot = E
-                    E_tot += n_symbol_a_atoms*E_ab_bond/2
-                    E_tot += (cn_number - n_symbol_a_atoms)*E_bb_bond/2
+                    total_energy = energy
+                    total_energy += n_symbol_a_atoms*e_ab_bond/2
+                    total_energy += (cn_number - n_symbol_a_atoms)*e_bb_bond/2
 
-                coefficients.append(E)
-                total_energies.append(E_tot)
+                coefficients.append(energy)
+                total_energies.append(total_energy)
 
     coefficients = np.array(coefficients)
 
@@ -184,7 +257,7 @@ def compute_coefficients_for_shape_optimization(global_topological_coefficients,
     symbols_copy = copy.deepcopy(symbols)
     symbols_copy.sort()
 
-    E_aa_bond = global_topological_coefficients[0]
+    e_aa_bond = global_topological_coefficients[0]
 
     coordination_energies_a = dict()
     for index, cn in enumerate(coordination_numbers):
@@ -194,15 +267,15 @@ def compute_coefficients_for_shape_optimization(global_topological_coefficients,
     total_energies = []
     for cn_number in coordination_numbers:
         for n_symbol_a_atoms in range(cn_number + 1):
-            E = 0
+            energy = 0
 
-            E += (n_symbol_a_atoms*E_aa_bond/2)
-            E += (coordination_energies_a[cn_number])
+            energy += (n_symbol_a_atoms*e_aa_bond/2)
+            energy += (coordination_energies_a[cn_number])
 
-            E_tot = E + n_symbol_a_atoms*E_aa_bond/2
+            total_energy = energy + n_symbol_a_atoms*e_aa_bond/2
 
-            coefficients.append(E)
-            total_energies.append(E_tot)
+            coefficients.append(energy)
+            total_energies.append(total_energy)
 
     coefficients += [0]*len(coefficients)
     total_energies += [0]*len(total_energies)
